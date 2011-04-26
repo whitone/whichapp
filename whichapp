@@ -1,0 +1,113 @@
+#!/bin/bash
+# 
+# whichapp -- locate a Mac OS X application in the system
+# 
+# Examples:
+#
+# $ whichapp grab
+# /Applications/Utilities/Grab.app
+#
+# $ whichapp -a photo
+# /Applications/iPhoto.app
+# /Applications/Photo Booth.app
+#
+#
+# Copyright 2009-2011 Stefano Cotta Ramusino
+# 
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+
+[ "$(uname)" != "Darwin" ] && { echo "This program requires Mac OS X." >&2; exit 1; }
+[ "$#" == "0" ] && { echo "usage: whichapp [-as] application ..." >&2; exit 1; }
+
+# init variables
+exitcode=0
+all=0
+silent=0
+
+# parse arguments
+[ "$1" == "-a" ] && { all=1; shift; } 
+[ "$1" == "-s" ] && { silent=1; shift; }
+[ "$1" == "-a" ] && { all=1; shift; } 
+[ "$1" == "-as" ] || [ "$1" == "-sa" ] && { all=1; silent=1; shift; } 
+[ -z "$1" ] && { echo "usage: whichapp [-as] application ..." >&2; exit 1; }
+
+# find lsregister
+for fw in Core Application
+do
+  lsregister="/System/Library/Frameworks/${fw}Services.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+  [ ! -x "$lsregister" ] && lsregister="" || break
+done
+[ -z "$lsregister" ] && lsregister=$(locate -l 1 lsregister 2>/dev/null)
+
+while [ -n "$1" ]
+do
+  $lsregister -dump | /usr/bin/awk -v appname="$1" -v all="$all" -v silent="$silent" '
+      
+    /bundle/ && ($2 == "id:") { 
+      app = 1
+    }
+      
+    /claim/ && ($2 == "id:") {
+      app = 0
+    }
+      
+    /path:/ {
+      $1 = ""
+      sub(" ", "")
+      path = $0
+      newapp = 1
+    }
+      
+    app && /name:/ {
+      $1 = ""
+      sub(" ", "")
+      if ($0 != "" && toupper($0) ~ toupper(appname) && !system("[ -d \"" path "\" ]")) {
+        found = 1
+        if (newapp && !silent) print path
+        newapp = 0
+        if (!all) exit !found
+      }
+    }
+    
+    app && newapp && /executable:/ {
+      $1=""
+      sub(".*/", "")
+      sub("\.app$", "")
+      if ($0 != "" && toupper($0) ~ toupper(appname) && !system("[ -d \"" path "\" ]")) {
+        found = 1
+        if (newapp && !silent) print path
+        newapp = 0
+        if (!all) exit !found
+      }
+      else {
+        split(path, dir, "/")
+        sub("\.app$", "", dir[length(dir)])
+        if (toupper(dir[length(dir)]) ~ toupper(appname) && !system("[ -d \"" path "\" ]")) {
+          found = 1
+          if (newapp && !silent) print path
+          newapp = 0
+          if (!all) exit !found
+        }
+      }
+    }
+    
+    END { 
+      exit !found 
+    }'
+  exitcode=$?
+  shift
+done
+
+exit $exitcode
